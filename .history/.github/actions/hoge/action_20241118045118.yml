@@ -1,0 +1,51 @@
+name: 'Add PR Description'
+description: 'Insert specific text between comment tags in PR description if a specific label is present'
+inputs:
+  label:
+    description: 'The label to check for'
+    required: true
+  text:
+    description: 'The text to insert into the PR description'
+    required: true
+  keyword:
+    description: 'The keyword to identify the comment tags'
+    required: false
+    default: 'ADD-PR-DESCRIPTION'
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Check for label and update PR description'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # PR番号を取得
+        PR_NUMBER=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
+        # PRのラベルを取得
+        LABELS=$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH")
+        
+        # 指定されたラベルが存在するか確認
+        if echo "$LABELS" | grep -q "${{ inputs.label }}"; then
+          # PRの説明を取得
+          PR_DESCRIPTION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" | jq -r '.body')
+          
+          # キーワードを設定（デフォルト値を使用）
+          KEYWORD="${{ inputs.keyword }}"
+          START_TAG="<!--${KEYWORD}:start-->"
+          END_TAG="<!--${KEYWORD}:end-->"
+          
+          # テキストがすでに存在しないか確認
+          if ! echo "$PR_DESCRIPTION" | grep -q "${{ inputs.text }}"; then
+            # テキストを挿入
+            UPDATED_DESCRIPTION=$(echo "$PR_DESCRIPTION" | sed "/$START_TAG/,/$END_TAG/{/$START_TAG/{n;s/.*/${{ inputs.text }}/;}}")
+            
+            # PRの説明を更新
+            curl -s -X PATCH -H "Authorization: token $GITHUB_TOKEN" \
+              -d "{\"body\":\"$UPDATED_DESCRIPTION\"}" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" || {
+                echo "Error updating PR description"
+                exit 1
+              }
+          fi
+        fi
+      shell: bash
