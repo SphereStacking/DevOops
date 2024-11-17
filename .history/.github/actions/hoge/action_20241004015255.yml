@@ -1,0 +1,42 @@
+name: 'Add PR Description'
+description: 'Insert specific text between comment tags in PR description if a specific label is present'
+inputs:
+  label:
+    description: 'The label to check for'
+    required: true
+  text:
+    description: 'The text to insert into the PR description'
+    required: true
+  keyword:
+    description: 'The keyword to identify the comment tags'
+    required: false
+    default: 'ADD-PR-DESCRIPTION'
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Check for label and update PR description'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        PR_NUMBER=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
+        LABELS=$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH")
+        if echo "$LABELS" | grep -q "${{ inputs.label }}"; then
+          PR_DESCRIPTION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" | jq -r '.body')
+          
+          # Use the provided keyword or default to 'default-keyword'
+          KEYWORD="${{ inputs.keyword }}"
+          START_TAG="<!--${KEYWORD}:start-->"
+          END_TAG="<!--${KEYWORD}:end-->"
+          
+          # Check if the text is already present between the tags
+          if ! echo "$PR_DESCRIPTION" | grep -q "${{ inputs.text }}"; then
+            # Insert text between the specified comment tags
+            UPDATED_DESCRIPTION=$(echo "$PR_DESCRIPTION" | sed "/$START_TAG/,/$END_TAG/{/$START_TAG/{n;s/.*/${{ inputs.text }}/;}}")
+            
+            curl -s -X PATCH -H "Authorization: token $GITHUB_TOKEN" \
+              -d "{\"body\":\"$UPDATED_DESCRIPTION\"}" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER"
+          fi
+        fi
+      shell: bash
